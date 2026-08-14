@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Wrestling Revolution-ish 2D</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:Arial,Helvetica,sans-serif;touch-action:none}
+  #game{display:block;width:100vw;height:100vh;background:#1a1a1a}
+  .hud{position:fixed;left:0;top:0;width:100%;pointer-events:none;color:white;text-shadow:0 2px 3px #000;font-weight:700}
+  .bars{display:flex;justify-content:space-between;padding:10px 12px;gap:14px}
+  .side{width:46%}
+  .name{font-size:16px;margin-bottom:4px}
+  .bar{height:12px;background:#333;border:2px solid #fff;border-radius:3px;overflow:hidden}
+  .fill{height:100%;background:#ddd;width:100%}
+  .stam{height:7px;margin-top:4px;background:#222;border:1px solid #ddd}
+  .stam .fill{background:#aaa}
+  #msg{position:fixed;top:18%;left:0;width:100%;text-align:center;font-size:26px;color:#fff;pointer-events:none;text-shadow:0 3px 6px #000;font-weight:900}
+  #controls{position:fixed;left:0;bottom:0;width:100%;height:43%;pointer-events:none}
+  .pad{position:absolute;left:18px;bottom:18px;width:154px;height:154px;border-radius:50%;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.22);pointer-events:auto}
+  .nub{position:absolute;width:58px;height:58px;border-radius:50%;background:rgba(255,255,255,.32);left:48px;top:48px}
+  .buttons{position:absolute;right:18px;bottom:18px;width:185px;height:165px;pointer-events:auto}
+  button{position:absolute;width:66px;height:66px;border-radius:50%;border:2px solid rgba(255,255,255,.7);background:rgba(0,0,0,.48);color:#fff;font-size:13px;font-weight:900}
+  #strike{right:0;top:42px}
+  #grapple{right:62px;top:0}
+  #run{right:62px;bottom:0}
+  #action{left:0;top:47px}
+  #help{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);color:#bbb;font-size:11px;pointer-events:none;white-space:nowrap}
+  @media (min-width:900px){#controls{display:none} #help{font-size:14px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+  <div class="bars">
+    <div class="side">
+      <div class="name">YOU</div>
+      <div class="bar"><div id="hp1" class="fill"></div></div>
+      <div class="bar stam"><div id="st1" class="fill"></div></div>
+    </div>
+    <div class="side" style="text-align:right">
+      <div class="name">CPU</div>
+      <div class="bar"><div id="hp2" class="fill"></div></div>
+      <div class="bar stam"><div id="st2" class="fill"></div></div>
+    </div>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="controls">
+  <div id="pad" class="pad"><div id="nub" class="nub"></div></div>
+  <div class="buttons">
+    <button id="strike">STRIKE</button>
+    <button id="grapple">GRAPPLE</button>
+    <button id="run">RUN</button>
+    <button id="action">PIN</button>
+  </div>
+</div>
+<div id="help">Keyboard: WASD move • J strike • K grapple • L run • I pin/get up • R restart</div>
+
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const msg=document.getElementById('msg');
+let gameOver=false, count=0, countTimer=0;
+
+class Wrestler{
+  constructor(x,y,skin,trunks,human=false){
+    Object.assign(this,{x,y,vx:0,vy:0,dir:1,skin,trunks,human,hp:100,st:100,state:'idle',timer:0,down:0,attackCD:0,grab:null,pin:false,flash:0});
+  }
+  hit(dmg,kx=0,ky=0,downChance=.18){
+    if(this.state==='down' || this.state==='pinned') dmg*=.65;
+    this.hp=clamp(this.hp-dmg,0,100); this.st=clamp(this.st-dmg*.3,0,100);
+    this.vx+=kx; this.vy+=ky; this.flash=8;
+    if(Math.random()<downChance || this.hp<18){
+      this.state='down'; this.down=65+Math.random()*70; this.grab=null;
+    } else { this.state='hurt'; this.timer=14; }
+  }
+}
+let p1,p2;
+function reset(){
+  p1=new Wrestler(W*.43,H*.55,'#d6a275','#111',true);
+  p2=new Wrestler(W*.57,H*.55,'#b9744c','#c22',false);
+  gameOver=false;count=0;msg.textContent='';
+}
+reset();
+
+const keys={};
+addEventListener('keydown',e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(e.key.toLowerCase()==='j') strike(p1,p2);
+ if(e.key.toLowerCase()==='k') grapple(p1,p2);
+ if(e.key.toLowerCase()==='i') action(p1,p2);
+ if(e.key.toLowerCase()==='r') reset();
+});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+let joy={x:0,y:0}, running=false;
+const pad=document.getElementById('pad'),nub=document.getElementById('nub');
+function moveJoy(e){
+ const r=pad.getBoundingClientRect(),t=e.touches?e.touches[0]:e;
+ const dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2);
+ const m=Math.hypot(dx,dy)||1,lim=47,scale=Math.min(lim,m)/m;
+ const nx=dx*scale,ny=dy*scale;nub.style.transform=`translate(${nx}px,${ny}px)`;
+ joy.x=clamp(dx/lim,-1,1);joy.y=clamp(dy/lim,-1,1);
+}
+pad.addEventListener('touchstart',e=>{e.preventDefault();moveJoy(e)},{passive:false});
+pad.addEventListener('touchmove',e=>{e.preventDefault();moveJoy(e)},{passive:false});
+pad.addEventListener('touchend',()=>{joy.x=joy.y=0;nub.style.transform='translate(0,0)'});
+document.getElementById('strike').addEventListener('touchstart',e=>{e.preventDefault();strike(p1,p2)});
+document.getElementById('grapple').addEventListener('touchstart',e=>{e.preventDefault();grapple(p1,p2)});
+document.getElementById('action').addEventListener('touchstart',e=>{e.preventDefault();action(p1,p2)});
+document.getElementById('run').addEventListener('touchstart',e=>{e.preventDefault();running=true});
+document.getElementById('run').addEventListener('touchend',()=>running=false);
+['strike','grapple','action'].forEach(id=>{
+ document.getElementById(id).addEventListener('mousedown',e=>{
+   if(id==='strike') strike(p1,p2); if(id==='grapple') grapple(p1,p2); if(id==='action') action(p1,p2);
+ });
+});
+
+function strike(a,b){
+ if(gameOver||a.attackCD>0||a.state==='down'||a.state==='pinned')return;
+ if(a.grab){ // knee in grapple
+   a.attackCD=20;a.st-=6;b.hit(8,a.dir*2.5,0,.2);return;
+ }
+ a.state='strike';a.timer=12;a.attackCD=18;a.st-=4;
+ if(dist(a,b)<68){
+   a.dir=b.x>a.x?1:-1;b.hit(6+Math.random()*4,a.dir*3,(b.y-a.y)*.03,.15);
+ }
+}
+function grapple(a,b){
+ if(gameOver||a.attackCD>0||a.state==='down'||a.state==='pinned')return;
+ if(a.grab){
+   // slam
+   a.attackCD=44;a.st-=14;
+   b.x=a.x+a.dir*26;b.y=a.y;
+   b.hit(15,a.dir*6,-1,.85);
+   b.state='down';b.down=110;
+   a.grab=null;a.state='idle'; return;
+ }
+ if(dist(a,b)<62 && b.state!=='down' && b.state!=='pinned'){
+   a.grab=b;b.grab=a;a.state='grapple';b.state='grappled';a.attackCD=20;b.timer=35;
+ }
+}
+function action(a,b){
+ if(gameOver)return;
+ if(a.state==='down'){ a.down=Math.min(a.down,12); return; }
+ if(b.state==='down' && dist(a,b)<65){
+   a.state='pinning'; b.state='pinned'; b.pin=true; a.pin=true; count=0; countTimer=0;
+ }
+}
+function releasePin(){
+ p1.pin=p2.pin=false;
+ if(p1.state==='pinning')p1.state='idle';
+ if(p2.state==='pinned'){p2.state='down';p2.down=45;}
+ count=0;msg.textContent='';
+}
+
+function ai(a,b){
+ if(gameOver||a.state==='down'||a.state==='pinned'||a.state==='grappled')return;
+ if(a.grab){
+   if(Math.random()<.04)grapple(a,b);
+   else if(Math.random()<.04)strike(a,b);
+   return;
+ }
+ const d=dist(a,b);
+ if(b.state==='down' && d<62 && b.hp<45 && Math.random()<.018){action(a,b);return}
+ if(d>52){
+   const sp=1.15+(a.hp<35?.15:0);
+   a.vx+=(b.x-a.x)/d*.18*sp;a.vy+=(b.y-a.y)/d*.13*sp;
+ } else {
+   if(Math.random()<.035) strike(a,b);
+   else if(Math.random()<.026) grapple(a,b);
+   else {a.vx+=(Math.random()-.5)*.2;a.vy+=(Math.random()-.5)*.15}
+ }
+}
+
+function ring(){
+ const rw=Math.min(W*.82,760),rh=Math.min(H*.5,370),rx=(W-rw)/2,ry=H*.31;
+ return {rx,ry,rw,rh, cx:W/2, cy:ry+rh/2};
+}
+function physics(w,other){
+ if(w.flash>0)w.flash--; if(w.attackCD>0)w.attackCD--;
+ if(w.timer>0 && --w.timer<=0 && (w.state==='strike'||w.state==='hurt'))w.state='idle';
+ if(w.state==='grappled'){if(w.timer>0)w.timer--; if(w.timer<=0){w.state='idle';if(other.grab===w)other.grab=null;}return}
+ if(w.state==='down'){
+   w.down--;w.vx*=.91;w.vy*=.91;
+   if(w.down<=0 && !w.pin){w.state='idle';w.hp=clamp(w.hp+1,0,100)}
+ }
+ if(w.state==='pinned'||w.state==='pinning')return;
+ if(w.grab){
+   const g=w.grab;w.dir=g.x>w.x?1:-1;g.x=w.x+w.dir*34;g.y=w.y+3;g.vx=g.vy=0;
+ }
+ const r=ring(),margin=28;
+ w.x=clamp(w.x+w.vx,r.rx+margin,r.rx+r.rw-margin);
+ w.y=clamp(w.y+w.vy,r.ry+55,r.ry+r.rh-25);
+ w.vx*=.78;w.vy*=.78;
+ w.st=clamp(w.st+.085,0,100);
+}
+function playerControl(){
+ if(gameOver||p1.state==='down'||p1.state==='pinned'||p1.state==='pinning'||p1.state==='grappled')return;
+ let x=(keys['d']?1:0)-(keys['a']?1:0)+joy.x;
+ let y=(keys['s']?1:0)-(keys['w']?1:0)+joy.y;
+ const m=Math.hypot(x,y); if(m>1){x/=m;y/=m}
+ const run=keys['l']||running, sp=run&&p1.st>3?0.72:0.38;
+ if(run&&m>.1)p1.st=clamp(p1.st-.22,0,100);
+ p1.vx+=x*sp;p1.vy+=y*sp*.75;
+ if(Math.abs(x)>.1)p1.dir=x>0?1:-1;
+}
+function pinLogic(){
+ if(!p1.pin&&!p2.pin)return;
+ countTimer++;
+ const pinned=p1.state==='pinned'?p1:p2;
+ if(countTimer%55===0){
+   count++;
+   msg.textContent=count<3?String(count):'3 — PINFALL!';
+   if(count>=3){
+     gameOver=true;
+     setTimeout(()=>msg.textContent=(p1.state==='pinning'?'YOU WIN!':'CPU WINS!')+'  —  Press R to restart',250);
+     return;
+   }
+ }
+ // kickout chance, stronger when healthier
+ if(countTimer>38){
+   const chance=(pinned.hp/100)*.006 + (count===2?.004:0);
+   if((pinned===p1 && (keys['i']||Math.random()<chance*.55)) || (pinned===p2 && Math.random()<chance)){
+      releasePin();
+   }
+ }
+}
+
+function drawRing(){
+ const r=ring();
+ ctx.fillStyle='#050505';ctx.fillRect(0,0,W,H);
+ // crowd
+ for(let i=0;i<90;i++){
+   const x=(i*83)%W,y=70+((i*47)%Math.max(80,r.ry-90));
+   ctx.fillStyle=`hsl(${(i*43)%360} 25% ${25+(i%4)*8}%)`;
+   ctx.beginPath();ctx.arc(x,y,5+(i%3),0,7);ctx.fill();
+ }
+ // ring shadow/apron
+ ctx.fillStyle='#171717';ctx.fillRect(r.rx-15,r.ry+35,r.rw+30,r.rh+25);
+ ctx.fillStyle='#d8d8d8';ctx.fillRect(r.rx,r.ry,r.rw,r.rh);
+ // mat lines
+ ctx.strokeStyle='rgba(0,0,0,.06)';ctx.lineWidth=1;
+ for(let x=r.rx;x<r.rx+r.rw;x+=35){ctx.beginPath();ctx.moveTo(x,r.ry);ctx.lineTo(x,r.ry+r.rh);ctx.stroke()}
+ // ropes
+ const ropeY=[r.ry+25,r.ry+43,r.ry+61];
+ ropeY.forEach((y,i)=>{ctx.strokeStyle=i===1?'#ddd':'#bbb';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(r.rx-10,y);ctx.lineTo(r.rx+r.rw+10,y);ctx.stroke()});
+ // posts
+ ctx.fillStyle='#222';
+ [[r.rx-12,r.ry+10],[r.rx+r.rw+4,r.ry+10]].forEach(([x,y])=>ctx.fillRect(x,y,9,r.rh+20));
+}
+function drawW(w){
+ ctx.save();ctx.translate(w.x,w.y);
+ if(w.flash%2)ctx.globalAlpha=.55;
+ let down=w.state==='down'||w.state==='pinned';
+ if(down){ctx.rotate(-1.48);ctx.translate(-18,2)}
+ const s=1;
+ // shadow
+ if(!down){ctx.fillStyle='rgba(0,0,0,.22)';ctx.beginPath();ctx.ellipse(0,27,23,8,0,0,7);ctx.fill()}
+ // legs
+ ctx.strokeStyle='#222';ctx.lineWidth=10;ctx.lineCap='round';
+ ctx.beginPath();ctx.moveTo(-8,11);ctx.lineTo(-11,35);ctx.moveTo(8,11);ctx.lineTo(11,35);ctx.stroke();
+ // boots
+ ctx.strokeStyle='#050505';ctx.lineWidth=12;ctx.beginPath();ctx.moveTo(-11,31);ctx.lineTo(-14,40);ctx.moveTo(11,31);ctx.lineTo(14,40);ctx.stroke();
+ // torso
+ ctx.fillStyle=w.skin;ctx.beginPath();ctx.roundRect(-18,-24,36,42,10);ctx.fill();
+ // trunks
+ ctx.fillStyle=w.trunks;ctx.fillRect(-18,7,36,14);
+ // arms
+ ctx.strokeStyle=w.skin;ctx.lineWidth=10;
+ let punch=(w.state==='strike')?w.dir*18:0;
+ ctx.beginPath();
+ ctx.moveTo(-15,-15);ctx.lineTo(-25,-2);
+ ctx.moveTo(15,-15);ctx.lineTo(25+punch,-4);
+ ctx.stroke();
+ // head
+ ctx.fillStyle=w.skin;ctx.beginPath();ctx.arc(0,-36,14,0,7);ctx.fill();
+ // hair
+ ctx.fillStyle='#33251d';ctx.beginPath();ctx.arc(0,-41,13,Math.PI,Math.PI*2);ctx.fill();
+ // face
+ ctx.fillStyle='#222';ctx.fillRect(w.dir*4,-38,3,3);
+ ctx.restore();
+}
+function draw(){
+ drawRing();
+ const arr=[p1,p2].sort((a,b)=>a.y-b.y);arr.forEach(drawW);
+ document.getElementById('hp1').style.width=p1.hp+'%';
+ document.getElementById('hp2').style.width=p2.hp+'%';
+ document.getElementById('st1').style.width=p1.st+'%';
+ document.getElementById('st2').style.width=p2.st+'%';
+}
+
+function loop(){
+ playerControl();ai(p2,p1);physics(p1,p2);physics(p2,p1);pinLogic();
+ if(p1.hp<=0 && p1.state!=='down'){p1.state='down';p1.down=160}
+ if(p2.hp<=0 && p2.state!=='down'){p2.state='down';p2.down=160}
+ draw();requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
