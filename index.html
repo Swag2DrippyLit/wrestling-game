@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2D Wrestling Combat Prototype - Version 2.1</title>
+  <style>
+    :root {
+      --bg: #111722;
+      --panel: #1a2230;
+      --text: #f4f7fb;
+      --muted: #aeb8c7;
+      --ring-mat: #d9e6ef;
+      --ring-edge: #57697c;
+      --rope: #e7edf3;
+      --player: #2f7df6;
+      --cpu: #e34e4e;
+      --health: #53d769;
+      --health-low: #ff5a5a;
+      --button: #2a3445;
+      --button-hover: #39465b;
+      --accent: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, #1c2635 0%, var(--bg) 58%), var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 24px 14px;
+      overflow-x: hidden;
+    }
+
+    .game-shell { width: min(980px, 100%); }
+
+    .title {
+      text-align: center;
+      margin: 0 0 18px;
+      font-size: clamp(24px, 4vw, 36px);
+      letter-spacing: 0.5px;
+    }
+
+    .hud {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 14px;
+    }
+
+    .fighter-card {
+      background: rgba(26, 34, 48, 0.96);
+      border: 1px solid #344154;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 10px 26px rgba(0,0,0,.22);
+    }
+
+    .fighter-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 9px;
+      font-weight: 700;
+    }
+
+    .health-track {
+      height: 22px;
+      background: #0e131c;
+      border: 2px solid #4d5b6e;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .health-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #37b957, var(--health));
+      transition: width 260ms ease, background 260ms ease;
+    }
+
+    .arena {
+      position: relative;
+      height: clamp(350px, 54vw, 520px);
+      min-height: 350px;
+      overflow: hidden;
+      border-radius: 18px;
+      background: linear-gradient(to bottom, #33455d 0 42%, #252d38 42% 100%);
+      border: 1px solid #3f4e62;
+      box-shadow: 0 16px 36px rgba(0,0,0,.28);
+    }
+
+    .crowd {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 43%;
+      opacity: .55;
+      background:
+        radial-gradient(circle at 8% 35%, #c4cad4 0 3px, transparent 4px),
+        radial-gradient(circle at 18% 50%, #9aa5b6 0 3px, transparent 4px),
+        radial-gradient(circle at 30% 28%, #d1d5dd 0 3px, transparent 4px),
+        radial-gradient(circle at 42% 52%, #9da8b7 0 3px, transparent 4px),
+        radial-gradient(circle at 53% 33%, #cbd0d9 0 3px, transparent 4px),
+        radial-gradient(circle at 65% 48%, #a7b1c1 0 3px, transparent 4px),
+        radial-gradient(circle at 79% 31%, #d5d9e0 0 3px, transparent 4px),
+        radial-gradient(circle at 91% 53%, #9ea9b9 0 3px, transparent 4px);
+      background-size: 120px 78px;
+    }
+
+    .ring {
+      position: absolute;
+      left: 7%;
+      right: 7%;
+      bottom: 8%;
+      height: 59%;
+    }
+
+    .ring-mat {
+      position: absolute;
+      left: 4%;
+      right: 4%;
+      bottom: 0;
+      height: 55%;
+      background: linear-gradient(#edf4f8, var(--ring-mat));
+      border: 5px solid var(--ring-edge);
+      box-shadow: 0 15px 0 #313c49;
+    }
+
+    .ring-skirt {
+      position: absolute;
+      left: 4%; right: 4%; bottom: -18px;
+      height: 42px;
+      background: linear-gradient(#253142, #151b24);
+      border: 4px solid #313c49;
+      border-top: none;
+    }
+
+    .post {
+      position: absolute;
+      bottom: 10%;
+      width: 14px;
+      height: 82%;
+      background: #3a4658;
+      border: 3px solid #222a35;
+      border-radius: 3px;
+      z-index: 3;
+    }
+    .post.left { left: 2%; }
+    .post.right { right: 2%; }
+
+    .rope {
+      position: absolute;
+      left: 3%; right: 3%;
+      height: 4px;
+      background: var(--rope);
+      box-shadow: 0 1px 2px rgba(0,0,0,.6);
+      z-index: 2;
+    }
+    .rope.top { bottom: 76%; }
+    .rope.mid { bottom: 58%; }
+    .rope.low { bottom: 40%; }
+
+    /* ==========================================================
+       V2.1 CONNECTED 3/4 WRESTLER RIG
+       True parent-child chains prevent limb separation.
+       ========================================================== */
+
+    .fighter {
+      position: absolute;
+      bottom: 20%;
+      width: 108px;
+      height: 178px;
+      z-index: 5;
+      transform-origin: 50% 92%;
+      pointer-events: none;
+    }
+
+    .fighter.player { left: 24%; }
+    .fighter.cpu { left: 66%; }
+
+    .fighter-root {
+      position: absolute;
+      inset: 0;
+      transform-origin: 54px 160px;
+      will-change: transform;
+    }
+
+    .segment { will-change: transform; }
+
+    .pelvis {
+      position: absolute;
+      left: 34px;
+      top: 94px;
+      width: 42px;
+      height: 27px;
+      border: 3px solid #202733;
+      border-radius: 10px 12px 9px 9px;
+      background: #151d29;
+      z-index: 5;
+      transform-origin: 50% 60%;
+    }
+
+    .torso {
+      position: absolute;
+      left: 28px;
+      top: 39px;
+      width: 54px;
+      height: 68px;
+      border: 3px solid #202733;
+      border-radius: 17px 13px 12px 14px;
+      transform-origin: 50% 86%;
+      z-index: 6;
+      overflow: visible;
+    }
+
+    .player .torso {
+      background: linear-gradient(100deg, #1f62ca 0 28%, var(--player) 29% 75%, #62a1ff 76% 100%);
+    }
+
+    .cpu .torso {
+      background: linear-gradient(100deg, #b83232 0 28%, var(--cpu) 29% 75%, #f07878 76% 100%);
+    }
+
+    .chest-depth {
+      position: absolute;
+      right: 5px;
+      top: 10px;
+      width: 13px;
+      height: 43px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.11);
+      transform: skewY(-10deg);
+      pointer-events: none;
+    }
+
+    .neck {
+      position: absolute;
+      left: 21px;
+      top: -8px;
+      width: 15px;
+      height: 14px;
+      background: #dca17f;
+      border: 3px solid #202733;
+      border-bottom: none;
+      border-radius: 5px 5px 2px 2px;
+      z-index: 3;
+    }
+
+    .head {
+      position: absolute;
+      left: 13px;
+      top: -36px;
+      width: 38px;
+      height: 40px;
+      border-radius: 48% 46% 44% 45%;
+      background: #e8b18e;
+      border: 3px solid #202733;
+      transform-origin: 52% 92%;
+      z-index: 10;
+    }
+
+    .ear {
+      position: absolute;
+      right: -5px;
+      top: 15px;
+      width: 8px;
+      height: 11px;
+      border-radius: 50%;
+      background: #dca17f;
+      border: 2px solid #202733;
+      z-index: -1;
+    }
+
+    .hair {
+      position: absolute;
+      left: 4px; right: 4px; top: -1px;
+      height: 11px;
+      border-radius: 50% 50% 18% 18%;
+      background: #372b27;
+    }
+
+    .eye {
+      position: absolute;
+      top: 16px;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: #222;
+    }
+    .eye.a { left: 11px; }
+    .eye.b { right: 7px; }
+
+    /* ARMS: upper arm contains its elbow, forearm and hand. */
+    .arm-chain {
+      position: absolute;
+      top: 13px;
+      width: 15px;
+      height: 44px;
+      transform-origin: 50% 7px;
+    }
+
+    .arm-chain.near { right: -7px; z-index: 12; }
+    .arm-chain.far  { left: -6px; z-index: 2; opacity: .93; }
+
+    .upper-arm {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 15px;
+      height: 43px;
+      background: #e8b18e;
+      border: 3px solid #202733;
+      border-radius: 9px;
+      transform-origin: 50% 7px;
+    }
+
+    .elbow {
+      position: absolute;
+      left: 50%;
+      bottom: -6px;
+      width: 12px;
+      height: 12px;
+      transform: translateX(-50%);
+      border-radius: 50%;
+      background: #e8b18e;
+      border: 2px solid #202733;
+      z-index: 4;
+    }
+
+    .forearm {
+      position: absolute;
+      left: 0;
+      top: 34px;
+      width: 14px;
+      height: 42px;
+      transform-origin: 50% 7px;
+      background: #e8b18e;
+      border: 3px solid #202733;
+      border-radius: 9px;
+      z-index: 3;
+    }
+
+    .hand {
+      position: absolute;
+      left: 50%;
+      bottom: -9px;
+      width: 17px;
+      height: 16px;
+      transform: translateX(-50%);
+      background: #e8b18e;
+      border: 3px solid #202733;
+      border-radius: 50% 55% 45% 45%;
+      z-index: 5;
+    }
+
+    /* LEGS: upper leg contains its knee, lower leg and boot. */
+    .leg-chain {
+      position: absolute;
+      top: 15px;
+      width: 18px;
+      height: 48px;
+      transform-origin: 50% 8px;
+    }
+
+    .leg-chain.near { right: 0; z-index: 7; }
+    .leg-chain.far  { left: 0; z-index: 3; opacity: .95; }
+
+    .upper-leg {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 18px;
+      height: 45px;
+      background: #1b2230;
+      border: 3px solid #202733;
+      border-radius: 9px 9px 8px 8px;
+      transform-origin: 50% 8px;
+    }
+
+    .knee {
+      position: absolute;
+      left: 50%;
+      bottom: -7px;
+      width: 13px;
+      height: 13px;
+      transform: translateX(-50%);
+      border-radius: 50%;
+      background: #1b2230;
+      border: 2px solid #202733;
+      z-index: 4;
+    }
+
+    .lower-leg {
+      position: absolute;
+      left: 0;
+      top: 37px;
+      width: 17px;
+      height: 44px;
+      transform-origin: 50% 8px;
+      background: #1b2230;
+      border: 3px solid #202733;
+      border-radius: 8px;
+      z-index: 3;
+    }
+
+    .boot {
+      position: absolute;
+      left: 50%;
+      bottom: -9px;
+      width: 28px;
+      height: 14px;
+      transform: translateX(-42%);
+      background: #0e141e;
+      border: 3px solid #202733;
+      border-radius: 6px 11px 5px 5px;
+      z-index: 5;
+    }
+
+    .fighter.cpu .fighter-root {
+      transform: scaleX(-1);
+    }
+
+    .fighter-nameplate {
+      position: absolute;
+      left: 50%;
+      bottom: -24px;
+      transform: translateX(-50%);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .7px;
+      color: #26303c;
+      background: rgba(255,255,255,.76);
+      border-radius: 5px;
+      padding: 2px 6px;
+      white-space: nowrap;
+    }
+
+    .impact {
+      position: absolute;
+      z-index: 20;
+      display: none;
+      font-size: clamp(28px, 6vw, 54px);
+      font-weight: 900;
+      color: var(--accent);
+      text-shadow: 3px 3px 0 #1c1c1c;
+      pointer-events: none;
+    }
+
+    .move-name {
+      position: absolute;
+      left: 50%;
+      top: 8%;
+      transform: translateX(-50%);
+      z-index: 15;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(12,17,25,.75);
+      border: 1px solid rgba(255,255,255,.22);
+      color: #fff;
+      font-size: clamp(12px, 2vw, 16px);
+      font-weight: 800;
+      letter-spacing: .7px;
+      opacity: 0;
+      transition: opacity 160ms ease;
+      pointer-events: none;
+    }
+    .move-name.show { opacity: 1; }
+
+    .status-panel {
+      margin-top: 14px;
+      padding: 16px;
+      min-height: 112px;
+      background: rgba(26,34,48,.96);
+      border: 1px solid #344154;
+      border-radius: 14px;
+      text-align: center;
+      box-shadow: 0 10px 26px rgba(0,0,0,.2);
+    }
+
+    .round-result {
+      font-size: clamp(18px, 3vw, 25px);
+      font-weight: 800;
+      margin-bottom: 7px;
+    }
+
+    .choices {
+      color: var(--muted);
+      min-height: 22px;
+      line-height: 1.5;
+    }
+
+    .controls {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    button {
+      min-height: 58px;
+      border: 1px solid #46556a;
+      border-radius: 12px;
+      background: var(--button);
+      color: var(--text);
+      font-size: 17px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+    }
+
+    button:hover:not(:disabled) { background: var(--button-hover); transform: translateY(-2px); }
+    button:active:not(:disabled) { transform: translateY(0); }
+    button:disabled { opacity: .48; cursor: not-allowed; }
+
+    .restart-wrap { margin-top: 12px; text-align: center; }
+    #restartButton {
+      display: none;
+      min-width: 210px;
+      padding: 0 24px;
+      background: #3b8b4a;
+      border-color: #58a968;
+    }
+
+    .footer-note {
+      margin-top: 12px;
+      text-align: center;
+      color: #7e8a9d;
+      font-size: 13px;
+    }
+
+    @media (max-width: 620px) {
+      body { padding: 14px 10px; }
+      .hud { gap: 10px; }
+      .fighter-card { padding: 10px; }
+      .fighter { transform: scale(.85); transform-origin: center bottom; }
+      .fighter.player { left: 16%; }
+      .fighter.cpu { left: 64%; }
+      .controls { gap: 8px; }
+      button { min-height: 54px; font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="game-shell">
+    <h1 class="title">2D Wrestling Combat Prototype — V2.1</h1>
+
+    <!-- V1 HEALTH HUD: gameplay values unchanged -->
+    <section class="hud">
+      <div class="fighter-card">
+        <div class="fighter-label"><span>PLAYER</span><span id="playerHpText">100 HP</span></div>
+        <div class="health-track"><div id="playerHealth" class="health-fill"></div></div>
+      </div>
+      <div class="fighter-card">
+        <div class="fighter-label"><span>CPU</span><span id="cpuHpText">100 HP</span></div>
+        <div class="health-track"><div id="cpuHealth" class="health-fill"></div></div>
+      </div>
+    </section>
+
+    <section class="arena">
+      <div class="crowd"></div>
+      <div class="ring" id="ring">
+        <div class="rope top"></div>
+        <div class="rope mid"></div>
+        <div class="rope low"></div>
+        <div class="post left"></div>
+        <div class="post right"></div>
+        <div class="ring-mat"></div>
+        <div class="ring-skirt"></div>
+
+        <div id="moveName" class="move-name"></div>
+
+        <!-- V2.1 connected 3/4 Player -->
+        <div id="playerFighter" class="fighter player" aria-label="Player wrestler">
+          <div class="fighter-root">
+            <div class="pelvis segment" data-part="pelvis">
+              <div class="leg-chain far">
+                <div class="upper-leg segment" data-part="upperLegL">
+                  <div class="knee"></div>
+                  <div class="lower-leg segment" data-part="lowerLegL"><div class="boot"></div></div>
+                </div>
+              </div>
+              <div class="leg-chain near">
+                <div class="upper-leg segment" data-part="upperLegR">
+                  <div class="knee"></div>
+                  <div class="lower-leg segment" data-part="lowerLegR"><div class="boot"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="torso segment" data-part="torso">
+              <div class="chest-depth"></div>
+              <div class="neck"></div>
+              <div class="head segment" data-part="head">
+                <div class="hair"></div><div class="ear"></div>
+                <div class="eye a"></div><div class="eye b"></div>
+              </div>
+
+              <div class="arm-chain far">
+                <div class="upper-arm segment" data-part="upperArmL">
+                  <div class="elbow"></div>
+                  <div class="forearm segment" data-part="forearmL"><div class="hand"></div></div>
+                </div>
+              </div>
+
+              <div class="arm-chain near">
+                <div class="upper-arm segment" data-part="upperArmR">
+                  <div class="elbow"></div>
+                  <div class="forearm segment" data-part="forearmR"><div class="hand"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="fighter-nameplate">PLAYER</div>
+        </div>
+
+        <!-- V2.1 connected 3/4 CPU -->
+        <div id="cpuFighter" class="fighter cpu" aria-label="CPU wrestler">
+          <div class="fighter-root">
+            <div class="pelvis segment" data-part="pelvis">
+              <div class="leg-chain far">
+                <div class="upper-leg segment" data-part="upperLegL">
+                  <div class="knee"></div>
+                  <div class="lower-leg segment" data-part="lowerLegL"><div class="boot"></div></div>
+                </div>
+              </div>
+              <div class="leg-chain near">
+                <div class="upper-leg segment" data-part="upperLegR">
+                  <div class="knee"></div>
+                  <div class="lower-leg segment" data-part="lowerLegR"><div class="boot"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="torso segment" data-part="torso">
+              <div class="chest-depth"></div>
+              <div class="neck"></div>
+              <div class="head segment" data-part="head">
+                <div class="hair"></div><div class="ear"></div>
+                <div class="eye a"></div><div class="eye b"></div>
+              </div>
+
+              <div class="arm-chain far">
+                <div class="upper-arm segment" data-part="upperArmL">
+                  <div class="elbow"></div>
+                  <div class="forearm segment" data-part="forearmL"><div class="hand"></div></div>
+                </div>
+              </div>
+
+              <div class="arm-chain near">
+                <div class="upper-arm segment" data-part="upperArmR">
+                  <div class="elbow"></div>
+                  <div class="forearm segment" data-part="forearmR"><div class="hand"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="fighter-nameplate">CPU</div>
+        </div>
+
+        <div id="impact" class="impact">BAM!</div>
+      </div>
+    </section>
+
+    <section class="status-panel" aria-live="polite">
+      <div id="roundResult" class="round-result">Choose your action.</div>
+      <div id="choiceDisplay" class="choices">Strike beats Counter • Counter beats Grapple • Grapple beats Strike</div>
+    </section>
+
+    <section class="controls">
+      <button class="action-button" data-action="strike">Strike</button>
+      <button class="action-button" data-action="grapple">Grapple</button>
+      <button class="action-button" data-action="counter">Counter</button>
+    </section>
+
+    <div class="restart-wrap"><button id="restartButton">Restart Match</button></div>
+    <div class="footer-note">Version 2.1 — Connected 3/4 rig + animation polish</div>
+  </main>
+
+  <script>
+    // ============================================================
+    // V1 GAME STATE - UNCHANGED GAMEPLAY VALUES
+    // ============================================================
+    const MAX_HEALTH = 100;
+    const DAMAGE = { strike: 10, grapple: 15, counter: 12 };
+    const ACTION_LABELS = { strike: "Strike", grapple: "Grapple", counter: "Counter" };
+
+    let playerHealth = MAX_HEALTH;
+    let cpuHealth = MAX_HEALTH;
+    let exchangeLocked = false;
+    let matchOver = false;
+
+    // ============================================================
+    // DOM REFERENCES
+    // ============================================================
+    const playerHealthBar = document.getElementById("playerHealth");
+    const cpuHealthBar = document.getElementById("cpuHealth");
+    const playerHpText = document.getElementById("playerHpText");
+    const cpuHpText = document.getElementById("cpuHpText");
+    const playerFighter = document.getElementById("playerFighter");
+    const cpuFighter = document.getElementById("cpuFighter");
+    const impact = document.getElementById("impact");
+    const moveName = document.getElementById("moveName");
+    const roundResult = document.getElementById("roundResult");
+    const choiceDisplay = document.getElementById("choiceDisplay");
+    const actionButtons = [...document.querySelectorAll(".action-button")];
+    const restartButton = document.getElementById("restartButton");
+
+    // ============================================================
+    // V2.1 CONNECTED 3/4 FIGHTER CONTROLLERS
+    // Child segments are nested in their parents, so connected joints
+    // are enforced structurally instead of approximated by coordinates.
+    // ============================================================
+    function createFighterController(element, homeX) {
+      const parts = {};
+      element.querySelectorAll("[data-part]").forEach(el => parts[el.dataset.part] = el);
+      return {
+        element,
+        root: element.querySelector(".fighter-root"),
+        parts,
+        homeX,
+        x: homeX,
+        y: 0,
+        rot: 0
+      };
+    }
+
+    const fighters = {
+      player: createFighterController(playerFighter, 24),
+      cpu: createFighterController(cpuFighter, 66)
+    };
+
+    const IDLE_POSE = {
+      rootRot: 0, rootY: 0,
+      pelvis: 0,
+      torso: -4, head: 5,
+      upperArmL: 24, forearmL: -34,
+      upperArmR: -30, forearmR: -48,
+      upperLegL: 12, lowerLegL: -19,
+      upperLegR: -10, lowerLegR: 20
+    };
+
+    function applyPose(fighter, pose = {}, duration = 180, easing = "ease") {
+      fighter.element.style.transition =
+        `left ${duration}ms ${easing}, bottom ${duration}ms ${easing}, transform ${duration}ms ${easing}`;
+
+      if (pose.x !== undefined) fighter.x = pose.x;
+      if (pose.y !== undefined) fighter.y = pose.y;
+      if (pose.rootRot !== undefined) fighter.rot = pose.rootRot;
+
+      fighter.element.style.left = `${fighter.x}%`;
+      fighter.element.style.bottom = `calc(20% + ${fighter.y}px)`;
+      fighter.element.style.transform = `rotate(${fighter.rot}deg)`;
+
+      const rootScale = fighter.element.classList.contains("cpu") ? -1 : 1;
+      fighter.root.style.transition = `transform ${duration}ms ${easing}`;
+      fighter.root.style.transform = `scaleX(${rootScale}) translateY(${pose.rootY || 0}px)`;
+
+      for (const [partName, partEl] of Object.entries(fighter.parts)) {
+        const angle = pose[partName] !== undefined
+          ? pose[partName]
+          : (IDLE_POSE[partName] || 0);
+        partEl.style.transition = `transform ${duration}ms ${easing}`;
+        partEl.style.transform = `rotate(${angle}deg)`;
+      }
+    }
+
+    function resetFighter(fighter, duration = 220) {
+      applyPose(fighter, { ...IDLE_POSE, x: fighter.homeX, y: 0, rootRot: 0, rootY: 0 }, duration, "ease-out");
+    }
+
+    async function poseStep(fighter, pose, duration = 180, hold = 0, easing = "ease") {
+      applyPose(fighter, pose, duration, easing);
+      await wait(duration + hold);
+    }
+
+    async function dualPoseStep(a, poseA, b, poseB, duration = 180, hold = 0, easing = "ease") {
+      applyPose(a, poseA, duration, easing);
+      applyPose(b, poseB, duration, easing);
+      await wait(duration + hold);
+    }
+
+    function sideSign(side) { return side === "player" ? 1 : -1; }
+    function fallDirection(side, degrees) { return sideSign(side) * degrees; }
+
+    // ============================================================
+    // V2.1 MOVE LIBRARY
+    // Each category contains multiple visual moves. Damage still comes
+    // only from the V1 action category, never from the individual move.
+    // ============================================================
+    const MOVE_LIBRARY = {
+      strike: [
+        { name: "Straight Punch", play: movePunch },
+        { name: "Clothesline", play: moveClothesline },
+        { name: "Front Kick", play: moveKick }
+      ],
+      grapple: [
+        { name: "Body Slam", play: moveBodySlam },
+        { name: "Suplex", play: moveSuplex },
+        { name: "DDT", play: moveDDT }
+      ],
+      counter: [
+        { name: "Slip & Strike", play: moveDodgeStrike },
+        { name: "Reversal Shove", play: moveReversalShove },
+        { name: "Counter Takedown", play: moveCounterTakedown }
+      ]
+    };
+
+    function pickMove(action) {
+      const options = MOVE_LIBRARY[action];
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function opponentOf(side) { return side === "player" ? "cpu" : "player"; }
+    function approachX(side, amount = 10) { return fighters[side].homeX + (side === "player" ? amount : -amount); }
+    function retreatX(side, amount = 4) { return fighters[side].homeX + (side === "player" ? -amount : amount); }
+
+    function showMoveName(text) {
+      moveName.textContent = text;
+      moveName.classList.add("show");
+    }
+    function hideMoveName() { moveName.classList.remove("show"); }
+
+    function showImpactBetween(attackerSide, text = "BAM!") {
+      impact.textContent = text;
+      impact.style.display = "block";
+      impact.style.left = attackerSide === "player" ? "52%" : "38%";
+      impact.style.top = "34%";
+    }
+    function hideImpact() { impact.style.display = "none"; }
+
+    async function recoverBoth() {
+      hideImpact();
+      applyPose(fighters.player, { ...IDLE_POSE, x: fighters.player.homeX, y: 0, rootRot: 0 }, 300, "ease-out");
+      applyPose(fighters.cpu, { ...IDLE_POSE, x: fighters.cpu.homeX, y: 0, rootRot: 0 }, 300, "ease-out");
+      await wait(340);
+      hideMoveName();
+    }
+
+    // ============================================================
+    // V2.1 ANIMATION CHOREOGRAPHY
+    // Same nine moves; improved contact, selling and get-up timing.
+    // ============================================================
+
+    async function sellAndGetUp(side, severity = "medium") {
+      const f = fighters[side];
+
+      if (severity === "light") {
+        await poseStep(f, {
+          x: retreatX(side, 3),
+          rootRot: fallDirection(side, 10),
+          torso: fallDirection(side, 12),
+          head: fallDirection(side, 18),
+          upperArmL: 42, forearmL: -16,
+          upperArmR: -12, forearmR: -26
+        }, 150, 90, "ease-out");
+        return;
+      }
+
+      await poseStep(f, {
+        y: -34,
+        rootRot: fallDirection(side, severity === "heavy" ? 87 : 76),
+        torso: fallDirection(side, 10),
+        head: fallDirection(side, 12),
+        upperArmL: 76, forearmL: 10,
+        upperArmR: -70, forearmR: -8,
+        upperLegL: 34, lowerLegL: -22,
+        upperLegR: -32, lowerLegR: 28
+      }, 180, severity === "heavy" ? 260 : 170, "ease-in");
+
+      await poseStep(f, {
+        y: -18,
+        rootRot: fallDirection(side, 48),
+        torso: -12, head: 8,
+        upperArmL: 45, forearmL: -35,
+        upperArmR: -38, forearmR: -42,
+        upperLegL: 44, lowerLegL: -58,
+        upperLegR: -25, lowerLegR: 48
+      }, 250, 65, "ease-out");
+
+      await poseStep(f, {
+        y: -5,
+        rootRot: fallDirection(side, 17),
+        torso: -10, head: 6,
+        upperArmL: 26, forearmL: -35,
+        upperArmR: -34, forearmR: -42,
+        upperLegL: 35, lowerLegL: -62,
+        upperLegR: -15, lowerLegR: 30
+      }, 240, 45, "ease-out");
+
+      resetFighter(f, 250);
+      await wait(270);
+    }
+
+    async function recoverAttacker(side, duration = 220) {
+      resetFighter(fighters[side], duration);
+      await wait(duration + 20);
+    }
+
+    // ---------------- STRIKES ----------------
+    async function movePunch(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await poseStep(a, {
+        x: approachX(attackerSide, 6),
+        torso: -10, head: 3,
+        upperArmR: 18, forearmR: -92,
+        upperArmL: 20, forearmL: -40
+      }, 200, 35, "ease-out");
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 11), torso: 8, upperArmR: -72, forearmR: -6, upperArmL: 30 },
+        d, { x: retreatX(defenderSide, 1), torso: fallDirection(defenderSide, 12), head: fallDirection(defenderSide, 28), upperArmR: -8, forearmR: -28 },
+        105, 65, "cubic-bezier(.2,.8,.2,1)"
+      );
+
+      showImpactBetween(attackerSide, "POW!");
+      await wait(100);
+      await recoverAttacker(attackerSide, 180);
+      await sellAndGetUp(defenderSide, "light");
+      hideImpact(); hideMoveName();
+    }
+
+    async function moveClothesline(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await poseStep(a, {
+        x: approachX(attackerSide, 5),
+        torso: -12,
+        upperArmR: -40, forearmR: -8,
+        upperArmL: 22, forearmL: -42
+      }, 210, 25);
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 12), torso: 7, upperArmR: -92, forearmR: 2, upperArmL: 28 },
+        d, { x: retreatX(defenderSide, 1), rootRot: fallDirection(defenderSide, 20), torso: fallDirection(defenderSide, 17), head: fallDirection(defenderSide, 26), upperArmL: 70, forearmL: 10, upperArmR: -66, forearmR: -5 },
+        125, 55, "ease-in"
+      );
+
+      showImpactBetween(attackerSide, "WHAM!");
+      await wait(80);
+      await recoverAttacker(attackerSide, 180);
+      await sellAndGetUp(defenderSide, "heavy");
+      hideImpact(); hideMoveName();
+    }
+
+    async function moveKick(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await poseStep(a, {
+        x: approachX(attackerSide, 6),
+        torso: -11,
+        upperArmL: 28, forearmL: -46,
+        upperArmR: -36, forearmR: -52,
+        upperLegR: 22, lowerLegR: -70
+      }, 200, 35);
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 10), torso: 10, upperLegR: -62, lowerLegR: 2, upperArmL: 35, upperArmR: -40 },
+        d, { x: retreatX(defenderSide, 2), torso: fallDirection(defenderSide, 20), head: fallDirection(defenderSide, 15), upperArmL: 45, upperArmR: -48 },
+        120, 75, "cubic-bezier(.2,.8,.2,1)"
+      );
+
+      showImpactBetween(attackerSide, "THUD!");
+      await wait(110);
+      await recoverAttacker(attackerSide, 210);
+      await sellAndGetUp(defenderSide, "light");
+      hideImpact(); hideMoveName();
+    }
+
+    // ---------------- GRAPPLES ----------------
+    async function grappleSetup(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 9), torso: -8, upperArmR: -58, forearmR: -25, upperArmL: -20, forearmL: -44 },
+        d, { x: approachX(defenderSide, 8), torso: -5, upperArmR: -52, forearmR: -30, upperArmL: -18, forearmL: -40 },
+        220, 80, "ease-out"
+      );
+      return { a, d, defenderSide };
+    }
+
+    async function moveBodySlam(attackerSide) {
+      const { a, d, defenderSide } = await grappleSetup(attackerSide);
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 11), y: -3, torso: 20, upperArmR: -92, forearmR: -38, upperArmL: 15, forearmL: -95, upperLegL: 30, lowerLegL: -38, upperLegR: -22, lowerLegR: 34 },
+        d, { x: approachX(defenderSide, 11), y: 23, rootRot: fallDirection(defenderSide, 68), torso: -6, head: 8, upperArmL: 62, forearmL: 20, upperArmR: -58, forearmR: -8, upperLegL: 30, lowerLegL: -18, upperLegR: -28, lowerLegR: 20 },
+        260, 100, "ease-out"
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 9), torso: -12, upperArmR: -42, forearmR: -26, upperArmL: 35, forearmL: -34 },
+        d, { x: retreatX(defenderSide, 1), y: -35, rootRot: fallDirection(defenderSide, 88), torso: 4, head: fallDirection(defenderSide, 8) },
+        155, 70, "ease-in"
+      );
+
+      showImpactBetween(attackerSide, "SLAM!");
+      await wait(180);
+      await recoverAttacker(attackerSide, 210);
+      await sellAndGetUp(defenderSide, "heavy");
+      hideImpact(); hideMoveName();
+    }
+
+    async function moveSuplex(attackerSide) {
+      const { a, d, defenderSide } = await grappleSetup(attackerSide);
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 11), torso: 14, upperArmR: -92, forearmR: -58, upperArmL: -56, forearmL: -24, upperLegL: 28, lowerLegL: -35, upperLegR: -25, lowerLegR: 36 },
+        d, { x: approachX(defenderSide, 11), torso: -18, head: -8, upperArmR: -72, forearmR: -36, upperArmL: 8, forearmL: -64 },
+        210, 70
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 10), y: -7, rootRot: fallDirection(attackerSide, -12), torso: -24, upperArmR: -112, forearmR: -30, upperArmL: -76, forearmL: -18 },
+        d, { x: approachX(defenderSide, 10), y: 52, rootRot: fallDirection(defenderSide, 136), torso: -6, upperArmL: 62, forearmL: 8, upperArmR: -60, forearmR: -10, upperLegL: 46, lowerLegL: -22, upperLegR: -42, lowerLegR: 24 },
+        285, 90, "ease-out"
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 6), y: -18, rootRot: fallDirection(attackerSide, -62), torso: -5, upperLegL: 46, lowerLegL: -30, upperLegR: -40, lowerLegR: 28 },
+        d, { x: retreatX(defenderSide, 4), y: -34, rootRot: fallDirection(defenderSide, 92), torso: 0, upperArmL: 86, forearmL: 10, upperArmR: -82, forearmR: -8 },
+        190, 55, "ease-in"
+      );
+
+      showImpactBetween(attackerSide, "BOOM!");
+      await wait(220);
+      await recoverAttacker(attackerSide, 300);
+      await sellAndGetUp(defenderSide, "heavy");
+      hideImpact(); hideMoveName();
+    }
+
+    async function moveDDT(attackerSide) {
+      const { a, d, defenderSide } = await grappleSetup(attackerSide);
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 11), torso: 12, head: 2, upperArmR: -98, forearmR: -82, upperArmL: 24, forearmL: -52 },
+        d, { x: approachX(defenderSide, 11), y: 2, rootRot: fallDirection(defenderSide, 24), torso: fallDirection(defenderSide, 20), head: fallDirection(defenderSide, 30), upperArmR: -34, forearmR: -45, upperArmL: 36, forearmL: -18 },
+        220, 110, "ease-out"
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 8), y: -30, rootRot: fallDirection(attackerSide, -70), torso: -6, upperArmR: -112, forearmR: -78, upperLegL: 50, lowerLegL: -34, upperLegR: -44, lowerLegR: 30 },
+        d, { x: approachX(defenderSide, 8), y: -34, rootRot: fallDirection(defenderSide, 82), torso: fallDirection(defenderSide, 6), head: fallDirection(defenderSide, 18), upperArmL: 65, forearmL: 12, upperArmR: -60, forearmR: -8, upperLegL: 38, lowerLegL: -25, upperLegR: -34, lowerLegR: 28 },
+        175, 55, "ease-in"
+      );
+
+      showImpactBetween(attackerSide, "DDT!");
+      await wait(220);
+      await recoverAttacker(attackerSide, 300);
+      await sellAndGetUp(defenderSide, "heavy");
+      hideImpact(); hideMoveName();
+    }
+
+    // ---------------- COUNTERS ----------------
+    async function moveDodgeStrike(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await dualPoseStep(
+        d, { x: approachX(defenderSide, 8), torso: 8, upperArmR: -72, forearmR: -8 },
+        a, { x: retreatX(attackerSide, 2), y: -2, torso: fallDirection(attackerSide, -26), head: fallDirection(attackerSide, -10), upperLegL: 22, lowerLegL: -28, upperLegR: -18, lowerLegR: 30 },
+        150, 70
+      );
+
+      await poseStep(a, { x: approachX(attackerSide, 7), torso: -8, upperArmR: 12, forearmR: -88 }, 145, 25);
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 10), torso: 9, upperArmR: -76, forearmR: -5 },
+        d, { x: retreatX(defenderSide, 3), torso: fallDirection(defenderSide, 18), head: fallDirection(defenderSide, 28) },
+        105, 70
+      );
+
+      showImpactBetween(attackerSide, "CRACK!");
+      await wait(110);
+      await recoverAttacker(attackerSide, 190);
+      await sellAndGetUp(defenderSide, "light");
+      hideImpact(); hideMoveName();
+    }
+
+    async function moveReversalShove(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await dualPoseStep(
+        d, { x: approachX(defenderSide, 8), upperArmR: -58, forearmR: -28, upperArmL: -18, forearmL: -44 },
+        a, { x: approachX(attackerSide, 7), torso: 7, upperArmR: -48, forearmR: -34, upperArmL: -18, forearmL: -42 },
+        190, 70
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 10), torso: 15, upperArmR: -78, forearmR: -8, upperArmL: -52, forearmL: -10 },
+        d, { x: retreatX(defenderSide, 6), rootRot: fallDirection(defenderSide, 30), torso: fallDirection(defenderSide, 20), head: fallDirection(defenderSide, 12), upperArmL: 66, forearmL: 8, upperArmR: -62, forearmR: -8 },
+        135, 70, "ease-out"
+      );
+
+      showImpactBetween(attackerSide, "SHOVE!");
+      await wait(80);
+      await recoverAttacker(attackerSide, 190);
+      await sellAndGetUp(defenderSide, "medium");
+      hideImpact(); hideMoveName();
+    }
+
+    async function moveCounterTakedown(attackerSide) {
+      const defenderSide = opponentOf(attackerSide);
+      const a = fighters[attackerSide], d = fighters[defenderSide];
+
+      await dualPoseStep(
+        d, { x: approachX(defenderSide, 9), upperArmR: -58, forearmR: -26, upperArmL: -22, forearmL: -40 },
+        a, { x: approachX(attackerSide, 8), torso: 22, upperArmR: -72, forearmR: -42, upperArmL: -48, forearmL: -42, upperLegL: 38, lowerLegL: -52, upperLegR: -26, lowerLegR: 42 },
+        210, 70
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 9), y: -10, rootRot: fallDirection(attackerSide, -32), torso: -15, upperArmR: -102, forearmR: -38, upperArmL: -80, forearmL: -28 },
+        d, { x: approachX(defenderSide, 9), y: 14, rootRot: fallDirection(defenderSide, 70), torso: -5, upperArmL: 70, forearmL: 10, upperArmR: -66, forearmR: -8 },
+        210, 60
+      );
+
+      await dualPoseStep(
+        a, { x: approachX(attackerSide, 6), y: -17, rootRot: fallDirection(attackerSide, -52), upperLegL: 48, lowerLegL: -34, upperLegR: -42, lowerLegR: 30 },
+        d, { x: retreatX(defenderSide, 3), y: -35, rootRot: fallDirection(defenderSide, 86), upperArmL: 85, forearmL: 10, upperArmR: -80, forearmR: -8 },
+        175, 55, "ease-in"
+      );
+
+      showImpactBetween(attackerSide, "DOWN!");
+      await wait(190);
+      await recoverAttacker(attackerSide, 280);
+      await sellAndGetUp(defenderSide, "heavy");
+      hideImpact(); hideMoveName();
+    }
+
+    // ============================================================
+    // V1 PLAYER INPUT / CPU / RPS LOGIC - PRESERVED
+    // ============================================================
+    actionButtons.forEach(button => {
+      button.addEventListener("click", () => handlePlayerInput(button.dataset.action));
+    });
+
+    function handlePlayerInput(playerAction) {
+      if (exchangeLocked || matchOver) return;
+      exchangeLocked = true;
+      setActionButtonsEnabled(false);
+
+      const cpuAction = chooseCpuAction();
+      const result = determineExchangeWinner(playerAction, cpuAction);
+
+      choiceDisplay.textContent = `Player chose ${ACTION_LABELS[playerAction]} • CPU chose ${ACTION_LABELS[cpuAction]}`;
+      resolveExchange(result, playerAction, cpuAction);
+    }
+
+    function chooseCpuAction() {
+      const actions = ["strike", "grapple", "counter"];
+      return actions[Math.floor(Math.random() * actions.length)];
+    }
+
+    function determineExchangeWinner(playerAction, cpuAction) {
+      if (playerAction === cpuAction) return "draw";
+
+      const playerWins =
+        (playerAction === "strike" && cpuAction === "counter") ||
+        (playerAction === "counter" && cpuAction === "grapple") ||
+        (playerAction === "grapple" && cpuAction === "strike");
+
+      return playerWins ? "player" : "cpu";
+    }
+
+    // ============================================================
+    // RESOLVE EXCHANGE - SAME RULES, V2 VISUAL MOVE SELECTION
+    // ============================================================
+    async function resolveExchange(result, playerAction, cpuAction) {
+      if (result === "draw") {
+        roundResult.textContent = "Draw! No damage.";
+        await playDrawAnimation();
+        finishExchange();
+        return;
+      }
+
+      const winnerAction = result === "player" ? playerAction : cpuAction;
+      const damageAmount = DAMAGE[winnerAction];
+      const move = pickMove(winnerAction);
+
+      if (result === "player") {
+        roundResult.textContent = `Player wins with ${ACTION_LABELS[winnerAction]} — ${move.name}!`;
+        showMoveName(move.name.toUpperCase());
+        await move.play("player");
+        applyDamage("cpu", damageAmount);
+      } else {
+        roundResult.textContent = `CPU wins with ${ACTION_LABELS[winnerAction]} — ${move.name}!`;
+        showMoveName(move.name.toUpperCase());
+        await move.play("cpu");
+        applyDamage("player", damageAmount);
+      }
+
+      updateHealthUI();
+      if (checkMatchEnd()) return;
+
+      await wait(420);
+      finishExchange();
+    }
+
+    async function playDrawAnimation() {
+      const p = fighters.player, c = fighters.cpu;
+      await dualPoseStep(
+        p, { x: approachX("player", 5), torso: -5, upperArmR: -62, forearmR: -18 },
+        c, { x: approachX("cpu", 5), torso: -5, upperArmR: -62, forearmR: -18 },
+        180, 90
+      );
+      showImpactBetween("player", "BLOCK!");
+      await wait(140);
+      await recoverBoth();
+    }
+
+    // ============================================================
+    // V1 DAMAGE - UNCHANGED
+    // ============================================================
+    function applyDamage(target, amount) {
+      if (target === "player") playerHealth = Math.max(0, playerHealth - amount);
+      else cpuHealth = Math.max(0, cpuHealth - amount);
+    }
+
+    // ============================================================
+    // V1 HEALTH / UI - UNCHANGED
+    // ============================================================
+    function updateHealthUI() {
+      playerHealthBar.style.width = `${playerHealth}%`;
+      cpuHealthBar.style.width = `${cpuHealth}%`;
+      playerHpText.textContent = `${playerHealth} HP`;
+      cpuHpText.textContent = `${cpuHealth} HP`;
+      updateHealthBarColor(playerHealthBar, playerHealth);
+      updateHealthBarColor(cpuHealthBar, cpuHealth);
+    }
+
+    function updateHealthBarColor(element, health) {
+      element.style.background = health <= 30
+        ? "linear-gradient(90deg, #d63a3a, var(--health-low))"
+        : "linear-gradient(90deg, #37b957, var(--health))";
+    }
+
+    // ============================================================
+    // V1 MATCH ENDING - UNCHANGED
+    // ============================================================
+    function checkMatchEnd() {
+      if (playerHealth > 0 && cpuHealth > 0) return false;
+      endMatch(playerHealth <= 0 ? "cpu" : "player");
+      return true;
+    }
+
+    function endMatch(winner) {
+      matchOver = true;
+      exchangeLocked = true;
+      setActionButtonsEnabled(false);
+      hideMoveName();
+
+      if (winner === "player") {
+        roundResult.textContent = "PLAYER WINS THE MATCH!";
+        choiceDisplay.textContent = "The CPU's health reached 0.";
+      } else {
+        roundResult.textContent = "CPU WINS THE MATCH!";
+        choiceDisplay.textContent = "Your health reached 0.";
+      }
+
+      restartButton.style.display = "inline-block";
+    }
+
+    // ============================================================
+    // V1 RESTART - UNCHANGED BEHAVIOR
+    // ============================================================
+    restartButton.addEventListener("click", restartMatch);
+
+    function restartMatch() {
+      playerHealth = MAX_HEALTH;
+      cpuHealth = MAX_HEALTH;
+      exchangeLocked = false;
+      matchOver = false;
+      hideImpact();
+      hideMoveName();
+      resetFighter(fighters.player, 0);
+      resetFighter(fighters.cpu, 0);
+      updateHealthUI();
+      roundResult.textContent = "Choose your action.";
+      choiceDisplay.textContent = "Strike beats Counter • Counter beats Grapple • Grapple beats Strike";
+      restartButton.style.display = "none";
+      setActionButtonsEnabled(true);
+    }
+
+    // ============================================================
+    // EXCHANGE HELPERS
+    // ============================================================
+    function finishExchange() {
+      if (matchOver) return;
+      exchangeLocked = false;
+      roundResult.textContent = "Choose your next action.";
+      setActionButtonsEnabled(true);
+    }
+
+    function setActionButtonsEnabled(enabled) {
+      actionButtons.forEach(button => button.disabled = !enabled);
+    }
+
+    function wait(milliseconds) {
+      return new Promise(resolve => setTimeout(resolve, milliseconds));
+    }
+
+    // ============================================================
+    // INITIAL SETUP
+    // ============================================================
+    resetFighter(fighters.player, 0);
+    resetFighter(fighters.cpu, 0);
+    updateHealthUI();
+  </script>
+</body>
+</html>
