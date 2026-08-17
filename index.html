@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ring Mind Prototype</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+#app{height:100%;display:flex;flex-direction:column;background:linear-gradient(#151515,#080808)}
+#hud{height:70px;display:grid;grid-template-columns:1fr 80px 1fr;gap:9px;align-items:center;padding:8px 11px;background:#080808;border-bottom:2px solid #444}
+.name{font-size:13px;font-weight:900;letter-spacing:.7px}.right{text-align:right}
+.bar{height:12px;background:#2b2b2b;border:1px solid #666;margin-top:5px;overflow:hidden}
+.fill{height:100%;width:100%;background:#f2f2f2;transition:width .3s}
+#mid{text-align:center;font-size:10px;color:#bbb}#round{font-size:18px;color:white}
+#stage{position:relative;flex:1;min-height:220px}
+canvas{display:block;width:100%;height:100%;background:#181818}
+#msg{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:95%;text-align:center;font-size:15px;font-weight:900;text-shadow:0 2px 4px #000}
+#reveal{position:absolute;top:34px;left:50%;transform:translateX(-50%);font-size:12px;font-weight:bold;text-shadow:0 2px 3px #000}
+#controls{background:#090909;border-top:2px solid #444;padding:9px}
+#moves{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;max-width:750px;margin:auto}
+button{border:2px solid #555;border-radius:8px;background:#222;color:white;font-weight:900;min-height:55px;font-size:14px}
+button:active{transform:scale(.98);background:#333}button:disabled{opacity:.3}
+small{display:block;color:#aaa;font-size:9px;margin-top:3px}
+#extras{display:grid;grid-template-columns:1fr 1fr;gap:7px;max-width:750px;margin:7px auto 0}
+#extras button{min-height:39px;font-size:12px}
+#restart{display:none;width:100%;max-width:750px;margin:7px auto 0}
+@media(min-width:800px){#app{max-width:900px;margin:auto;border-left:1px solid #333;border-right:1px solid #333}}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="hud">
+ <div><div class="name">ACE STEEL</div><div class="bar"><div id="pbar" class="fill"></div></div></div>
+ <div id="mid">EXCHANGE<div id="round">1</div></div>
+ <div><div class="name right">REX RIOT</div><div class="bar"><div id="ebar" class="fill"></div></div></div>
+</div>
+<div id="stage">
+ <canvas id="c"></canvas>
+ <div id="msg">Choose your attack.</div>
+ <div id="reveal"></div>
+</div>
+<div id="controls">
+ <div id="moves">
+  <button data-move="strike">STRIKE<small>beats Grapple</small></button>
+  <button data-move="grapple">GRAPPLE<small>beats Counter</small></button>
+  <button data-move="counter">COUNTER<small>beats Strike</small></button>
+ </div>
+ <div id="extras">
+  <button id="fin" disabled>FINISHER 🔒</button>
+  <button id="pin" disabled>PIN 🔒</button>
+ </div>
+ <button id="restart">RESTART MATCH</button>
+</div>
+</div>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');
+const msg=document.getElementById('msg'),rev=document.getElementById('reveal');
+const pbar=document.getElementById('pbar'),ebar=document.getElementById('ebar');
+const roundEl=document.getElementById('round'),fin=document.getElementById('fin'),pin=document.getElementById('pin'),restart=document.getElementById('restart');
+let W,H,dpr=devicePixelRatio||1;
+function size(){let r=c.getBoundingClientRect();W=r.width;H=r.height;c.width=W*dpr;c.height=H*dpr;x.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',size);size();
+
+let P,E,round,busy,anim,winner,lastPlayer=[];
+function reset(){
+ P={hp:100,mom:0}; E={hp:100,mom:0}; round=1;busy=false;anim=null;winner=null;lastPlayer=[];
+ msg.textContent='Choose your attack.';rev.textContent='';restart.style.display='none';
+ document.querySelectorAll('#moves button').forEach(b=>b.disabled=false);
+ update(); draw();
+}
+function update(){
+ pbar.style.width=P.hp+'%';ebar.style.width=E.hp+'%';roundEl.textContent=round;
+ fin.disabled=P.mom<3||busy||winner;fin.textContent=P.mom>=3?'FINISHER READY':'FINISHER 🔒';
+ pin.disabled=E.hp>28||busy||winner;pin.textContent=E.hp<=28?'PIN ATTEMPT':'PIN 🔒';
+}
+const beats={strike:'grapple',grapple:'counter',counter:'strike'};
+const labels={strike:'STRIKE',grapple:'GRAPPLE',counter:'COUNTER'};
+function aiChoice(){
+ // AI lightly adapts if the player repeats choices, but remains beatable.
+ if(lastPlayer.length>=2 && lastPlayer.at(-1)===lastPlayer.at(-2) && Math.random()<.55){
+   let repeated=lastPlayer.at(-1);
+   return Object.keys(beats).find(k=>beats[k]===repeated);
+ }
+ return ['strike','grapple','counter'][Math.floor(Math.random()*3)];
+}
+function choose(pm){
+ if(busy||winner)return;
+ busy=true;lastPlayer.push(pm);if(lastPlayer.length>3)lastPlayer.shift();
+ let em=aiChoice();
+ rev.textContent=`YOU: ${labels[pm]}   •   REX: ${labels[em]}`;
+ let result=pm===em?'tie':beats[pm]===em?'player':'enemy';
+ if(result==='tie'){msg.textContent='CLASH! Neither man gets control.';anim={type:'clash',t:0};}
+ else if(result==='player'){
+   let dmg=pm==='strike'?10:pm==='grapple'?13:7; E.hp=Math.max(0,E.hp-dmg);P.mom=Math.min(3,P.mom+1);
+   msg.textContent=pm==='counter'?'Perfect read — reversal!':pm==='grapple'?'You win the grapple!':'Clean shot!';
+   anim={type:pm,attacker:'p',t:0};
+ }else{
+   let dmg=em==='strike'?9:em==='grapple'?12:6; P.hp=Math.max(0,P.hp-dmg);E.mom=Math.min(3,E.mom+1);
+   msg.textContent=em==='counter'?'Rex reads you and reverses!':em==='grapple'?'Rex wins the grapple!':'Rex lands the strike!';
+   anim={type:em,attacker:'e',t:0};
+ }
+ update();
+ setTimeout(()=>{
+   if(P.hp<=0){end('Rex Riot wins by knockout!');return}
+   if(E.hp<=0){end('Ace Steel wins by knockout!');return}
+   round++;busy=false;rev.textContent='';msg.textContent='Choose your next move.';anim=null;update();
+ },850);
+}
+function end(t){winner=true;busy=true;msg.textContent=t;rev.textContent='MATCH OVER';document.querySelectorAll('button').forEach(b=>b.disabled=true);restart.disabled=false;restart.style.display='block'}
+document.querySelectorAll('#moves button').forEach(b=>b.onclick=()=>choose(b.dataset.move));
+fin.onclick=()=>{
+ if(P.mom<3||busy)return;busy=true;P.mom=0;let success=Math.random()<(.58+(100-E.hp)/250);
+ if(success){E.hp=Math.max(0,E.hp-30);msg.textContent='ACE DRIVER! Huge finisher!';anim={type:'finisher',attacker:'p',t:0}}
+ else{msg.textContent='Rex escapes the finisher!';anim={type:'counter',attacker:'e',t:0}}
+ update();setTimeout(()=>{if(E.hp<=0){end('Ace Steel wins by knockout!');return}round++;busy=false;anim=null;msg.textContent='Choose your next move.';update()},1000)
+};
+pin.onclick=()=>{
+ if(E.hp>28||busy)return;busy=true;let chance=.45+(28-E.hp)*.018;
+ msg.textContent='ONE... TWO...';anim={type:'pin',attacker:'p',t:0};
+ setTimeout(()=>{if(Math.random()<chance)end('THREE! Ace Steel wins by pinfall!');else{msg.textContent='KICK OUT!';round++;busy=false;anim=null;update()}},1200)
+};
+restart.onclick=()=>{document.querySelectorAll('button').forEach(b=>b.disabled=false);reset()};
+
+function ring(){
+ let floor=H*.72;
+ x.fillStyle='#282828';x.fillRect(0,0,W,H);
+ // crowd
+ for(let row=0;row<3;row++)for(let i=0;i<Math.ceil(W/24);i++){
+   x.fillStyle=(i+row)%3===0?'#555':(i+row)%3===1?'#3e3e3e':'#666';
+   x.beginPath();x.arc(i*24+10+(row%2)*8,85+row*24,7,0,Math.PI*2);x.fill();
+ }
+ // ring apron and mat
+ x.fillStyle='#c9c9c9';x.beginPath();x.moveTo(W*.08,H*.42);x.lineTo(W*.91,H*.42);x.lineTo(W*.98,floor);x.lineTo(W*.02,floor);x.closePath();x.fill();
+ x.fillStyle='#777';x.fillRect(W*.02,floor,W*.96,H*.12);
+ // ropes
+ for(let j=0;j<3;j++){x.strokeStyle='#e7e7e7';x.lineWidth=3;x.beginPath();x.moveTo(W*.045,H*.34+j*38);x.lineTo(W*.955,H*.34+j*38);x.stroke()}
+ // posts
+ x.fillStyle='#333';x.fillRect(W*.035,H*.29,9,H*.47);x.fillRect(W*.95,H*.29,9,H*.47);
+ return floor;
+}
+function wrestler(cx,cy,scale,flip,color,hp,pose){
+ x.save();x.translate(cx,cy);x.scale(flip? -scale:scale,scale);
+ // shadow
+ x.save();x.scale(flip?-1:1,1);x.fillStyle='rgba(0,0,0,.25)';x.beginPath();x.ellipse(0,48,31,8,0,0,Math.PI*2);x.fill();x.restore();
+ // back leg creates 3/4 depth
+ x.strokeStyle='#171717';x.lineWidth=13;x.lineCap='round';
+ x.beginPath();x.moveTo(7,22);x.lineTo(14,47);x.stroke();
+ // boots
+ x.strokeStyle='#050505';x.lineWidth=10;x.beginPath();x.moveTo(14,45);x.lineTo(22,47);x.stroke();
+ // front leg
+ x.strokeStyle='#242424';x.lineWidth=14;x.beginPath();x.moveTo(-8,21);x.lineTo(-12,47);x.stroke();
+ x.strokeStyle='#050505';x.lineWidth=10;x.beginPath();x.moveTo(-12,45);x.lineTo(-22,48);x.stroke();
+ // torso angled toward opponent but front visible
+ x.fillStyle=color;x.beginPath();x.moveTo(-22,-23);x.quadraticCurveTo(0,-34,23,-19);x.lineTo(14,22);x.lineTo(-15,22);x.closePath();x.fill();
+ // trunks
+ x.fillStyle='#111';x.beginPath();x.moveTo(-15,10);x.lineTo(15,10);x.lineTo(12,26);x.lineTo(-12,26);x.closePath();x.fill();
+ // far arm
+ x.strokeStyle='#b87850';x.lineWidth=11;
+ x.beginPath();x.moveTo(17,-15);x.lineTo(pose==='attack'?35:-1,pose==='attack'?-7:5);x.stroke();
+ // near arm — larger/front for 3/4 look
+ x.strokeStyle='#d49a70';x.lineWidth=13;
+ x.beginPath();x.moveTo(-18,-14);x.lineTo(pose==='attack'?-38:-27,pose==='attack'?-9:8);x.stroke();
+ // neck/head
+ x.fillStyle='#c98d65';x.fillRect(-6,-35,12,10);
+ x.fillStyle='#d7a078';x.beginPath();x.ellipse(-2,-48,16,18,-.08,0,Math.PI*2);x.fill();
+ // ear on far side + hair
+ x.fillStyle='#b87850';x.beginPath();x.arc(13,-48,4,0,Math.PI*2);x.fill();
+ x.fillStyle='#2b1b13';x.beginPath();x.arc(-4,-57,13,Math.PI,Math.PI*2);x.lineTo(9,-52);x.quadraticCurveTo(-2,-60,-16,-51);x.closePath();x.fill();
+ // face placed toward camera/opponent
+ x.fillStyle='#222';x.beginPath();x.arc(-7,-49,1.5,0,Math.PI*2);x.fill();x.beginPath();x.arc(3,-50,1.5,0,Math.PI*2);x.fill();
+ x.strokeStyle='#7b4d36';x.lineWidth=1.5;x.beginPath();x.moveTo(-3,-42);x.lineTo(5,-42);x.stroke();
+ x.restore();
+}
+function draw(){
+ x.clearRect(0,0,W,H);let floor=ring();
+ let t=performance.now()/1000;
+ let px=W*.34,ex=W*.66,py=floor-52,ey=floor-52;
+ let pp='idle',ep='idle';
+ if(anim){
+   let elapsed=(performance.now()-anim.start||0);
+   if(!anim.start)anim.start=performance.now();
+   let phase=Math.sin(Math.min(1,(performance.now()-anim.start)/600)*Math.PI);
+   if(anim.attacker==='p'){px+=phase*42;pp='attack';ex+=phase*10}
+   if(anim.attacker==='e'){ex-=phase*42;ep='attack';px-=phase*10}
+   if(anim.type==='clash'){px+=phase*22;ex-=phase*22;pp=ep='attack'}
+   if(anim.type==='pin'){px+=phase*55;pp='attack'}
+ }
+ wrestler(px,py,1.25,false,'#1d65b7',P.hp,pp);
+ wrestler(ex,ey,1.25,true,'#a72d2d',E.hp,ep);
+ requestAnimationFrame(draw);
+}
+reset();draw();
+</script>
+</body>
+</html>
