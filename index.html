@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ring Mind - 10 Part Rig</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+#app{height:100%;display:flex;flex-direction:column;background:linear-gradient(#151515,#080808)}
+#hud{height:70px;display:grid;grid-template-columns:1fr 80px 1fr;gap:9px;align-items:center;padding:8px 11px;background:#080808;border-bottom:2px solid #444}
+.name{font-size:13px;font-weight:900;letter-spacing:.7px}.right{text-align:right}
+.bar{height:12px;background:#2b2b2b;border:1px solid #666;margin-top:5px;overflow:hidden}.fill{height:100%;width:100%;background:#f2f2f2;transition:width .3s}
+#mid{text-align:center;font-size:10px;color:#bbb}#round{font-size:18px;color:white}
+#stage{position:relative;flex:1;min-height:220px}
+canvas{display:block;width:100%;height:100%;background:#181818}
+#msg{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:95%;text-align:center;font-size:15px;font-weight:900;text-shadow:0 2px 4px #000}
+#reveal{position:absolute;top:34px;left:50%;transform:translateX(-50%);font-size:12px;font-weight:bold;text-shadow:0 2px 3px #000}
+#controls{background:#090909;border-top:2px solid #444;padding:9px}
+#moves{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;max-width:750px;margin:auto}
+button{border:2px solid #555;border-radius:8px;background:#222;color:white;font-weight:900;min-height:55px;font-size:14px}
+button:active{transform:scale(.98);background:#333}button:disabled{opacity:.3}
+small{display:block;color:#aaa;font-size:9px;margin-top:3px}
+#extras{display:grid;grid-template-columns:1fr 1fr;gap:7px;max-width:750px;margin:7px auto 0}
+#extras button{min-height:39px;font-size:12px}
+#restart{display:none;width:100%;max-width:750px;margin:7px auto 0}
+#rigNote{position:absolute;right:10px;bottom:8px;font-size:10px;color:#aaa;background:#111a;padding:4px 6px;border-radius:5px}
+@media(min-width:800px){#app{max-width:900px;margin:auto;border-left:1px solid #333;border-right:1px solid #333}}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="hud">
+ <div><div class="name">ACE STEEL</div><div class="bar"><div id="pbar" class="fill"></div></div></div>
+ <div id="mid">EXCHANGE<div id="round">1</div></div>
+ <div><div class="name right">REX RIOT</div><div class="bar"><div id="ebar" class="fill"></div></div></div>
+</div>
+<div id="stage">
+ <canvas id="c"></canvas>
+ <div id="msg">Choose your attack.</div>
+ <div id="reveal"></div>
+ <div id="rigNote">10-part articulated rig</div>
+</div>
+<div id="controls">
+ <div id="moves">
+  <button data-move="strike">STRIKE<small>beats Grapple</small></button>
+  <button data-move="grapple">GRAPPLE<small>beats Counter</small></button>
+  <button data-move="counter">COUNTER<small>beats Strike</small></button>
+ </div>
+ <div id="extras">
+  <button id="fin" disabled>FINISHER 🔒</button>
+  <button id="pin" disabled>PIN 🔒</button>
+ </div>
+ <button id="restart">RESTART MATCH</button>
+</div>
+</div>
+
+<script>
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+const msg=document.getElementById('msg'),rev=document.getElementById('reveal');
+const pbar=document.getElementById('pbar'),ebar=document.getElementById('ebar');
+const roundEl=document.getElementById('round'),fin=document.getElementById('fin'),pin=document.getElementById('pin'),restart=document.getElementById('restart');
+
+let W,H,dpr=devicePixelRatio||1;
+function size(){
+  let r=c.getBoundingClientRect();
+  W=r.width; H=r.height;
+  c.width=W*dpr; c.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize',size); size();
+
+let P,E,round,busy,anim,winner,lastPlayer=[];
+const beats={strike:'grapple',grapple:'counter',counter:'strike'};
+const labels={strike:'STRIKE',grapple:'GRAPPLE',counter:'COUNTER'};
+
+function reset(){
+  P={hp:100,mom:0}; E={hp:100,mom:0}; round=1; busy=false; anim=null; winner=null; lastPlayer=[];
+  msg.textContent='Choose your attack.'; rev.textContent=''; restart.style.display='none';
+  document.querySelectorAll('#moves button').forEach(b=>b.disabled=false);
+  update();
+}
+function update(){
+  pbar.style.width=P.hp+'%'; ebar.style.width=E.hp+'%'; roundEl.textContent=round;
+  fin.disabled=P.mom<3||busy||winner; fin.textContent=P.mom>=3?'FINISHER READY':'FINISHER 🔒';
+  pin.disabled=E.hp>28||busy||winner; pin.textContent=E.hp<=28?'PIN ATTEMPT':'PIN 🔒';
+}
+function aiChoice(){
+  if(lastPlayer.length>=2 && lastPlayer.at(-1)===lastPlayer.at(-2) && Math.random()<.55){
+    let repeated=lastPlayer.at(-1);
+    return Object.keys(beats).find(k=>beats[k]===repeated);
+  }
+  return ['strike','grapple','counter'][Math.floor(Math.random()*3)];
+}
+function beginAnim(type,attacker='p',duration=760){
+  anim={type,attacker,start:performance.now(),duration};
+}
+function choose(pm){
+  if(busy||winner)return;
+  busy=true; lastPlayer.push(pm); if(lastPlayer.length>3)lastPlayer.shift();
+  const em=aiChoice();
+  rev.textContent=`YOU: ${labels[pm]}   •   REX: ${labels[em]}`;
+  let result=pm===em?'tie':beats[pm]===em?'player':'enemy';
+
+  if(result==='tie'){
+    msg.textContent='CLASH! Neither man gets control.';
+    beginAnim('clash','none',650);
+  } else if(result==='player'){
+    let dmg=pm==='strike'?10:pm==='grapple'?13:7;
+    E.hp=Math.max(0,E.hp-dmg); P.mom=Math.min(3,P.mom+1);
+    msg.textContent=pm==='counter'?'Perfect read — reversal!':pm==='grapple'?'You win the grapple!':'Clean shot!';
+    beginAnim(pm,'p');
+  } else {
+    let dmg=em==='strike'?9:em==='grapple'?12:6;
+    P.hp=Math.max(0,P.hp-dmg); E.mom=Math.min(3,E.mom+1);
+    msg.textContent=em==='counter'?'Rex reads you and reverses!':em==='grapple'?'Rex wins the grapple!':'Rex lands the strike!';
+    beginAnim(em,'e');
+  }
+  update();
+  setTimeout(()=>{
+    if(P.hp<=0){end('Rex Riot wins by knockout!');return}
+    if(E.hp<=0){end('Ace Steel wins by knockout!');return}
+    round++; busy=false; rev.textContent=''; msg.textContent='Choose your next move.'; anim=null; update();
+  },900);
+}
+function end(t){
+  winner=true; busy=true; msg.textContent=t; rev.textContent='MATCH OVER';
+  document.querySelectorAll('button').forEach(b=>b.disabled=true);
+  restart.disabled=false; restart.style.display='block';
+}
+document.querySelectorAll('#moves button').forEach(b=>b.onclick=()=>choose(b.dataset.move));
+fin.onclick=()=>{
+  if(P.mom<3||busy)return;
+  busy=true; P.mom=0;
+  let success=Math.random()<(.58+(100-E.hp)/250);
+  if(success){E.hp=Math.max(0,E.hp-30);msg.textContent='ACE DRIVER! Huge finisher!';beginAnim('finisher','p',1000)}
+  else{msg.textContent='Rex escapes the finisher!';beginAnim('counter','e',850)}
+  update();
+  setTimeout(()=>{
+    if(E.hp<=0){end('Ace Steel wins by knockout!');return}
+    round++;busy=false;anim=null;msg.textContent='Choose your next move.';update();
+  },1050)
+};
+pin.onclick=()=>{
+  if(E.hp>28||busy)return;
+  busy=true; let chance=.45+(28-E.hp)*.018;
+  msg.textContent='ONE... TWO...'; beginAnim('pin','p',1200);
+  setTimeout(()=>{
+    if(Math.random()<chance)end('THREE! Ace Steel wins by pinfall!');
+    else{msg.textContent='KICK OUT!';round++;busy=false;anim=null;update()}
+  },1200)
+};
+restart.onclick=()=>{document.querySelectorAll('button').forEach(b=>b.disabled=false);reset()};
+
+// ---------- drawing helpers ----------
+const RAD=Math.PI/180;
+function lerp(a,b,t){return a+(b-a)*t}
+function ease(t){return .5-.5*Math.cos(Math.PI*Math.max(0,Math.min(1,t)))}
+function rotPoint(x,y,len,deg){
+  const a=deg*RAD;
+  return {x:x+Math.cos(a)*len,y:y+Math.sin(a)*len};
+}
+function drawRoundedSegment(x1,y1,x2,y2,width,color){
+  ctx.strokeStyle=color; ctx.lineWidth=width; ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+}
+function ring(){
+  let floor=H*.72;
+  ctx.fillStyle='#282828';ctx.fillRect(0,0,W,H);
+  for(let row=0;row<3;row++)for(let i=0;i<Math.ceil(W/24);i++){
+    ctx.fillStyle=(i+row)%3===0?'#555':(i+row)%3===1?'#3e3e3e':'#666';
+    ctx.beginPath();ctx.arc(i*24+10+(row%2)*8,85+row*24,7,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle='#c9c9c9';ctx.beginPath();ctx.moveTo(W*.08,H*.42);ctx.lineTo(W*.91,H*.42);ctx.lineTo(W*.98,floor);ctx.lineTo(W*.02,floor);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#777';ctx.fillRect(W*.02,floor,W*.96,H*.12);
+  for(let j=0;j<3;j++){ctx.strokeStyle='#eee';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(W*.045,H*.34+j*38);ctx.lineTo(W*.955,H*.34+j*38);ctx.stroke()}
+  ctx.fillStyle='#333';ctx.fillRect(W*.035,H*.29,9,H*.47);ctx.fillRect(W*.95,H*.29,9,H*.47);
+  return floor;
+}
+
+// exactly 10 body parts:
+// 1 head, 2 torso+pelvis,
+// 3 near upper arm, 4 far upper arm,
+// 5 near forearm, 6 far forearm,
+// 7 near thigh, 8 far thigh,
+// 9 near shin, 10 far shin.
+function getPose(side){
+  // default 3/4 stance
+  let pose={
+    rootX:0,rootY:0,torsoRot:0,headRot:0,
+    nUA:118,nFA:48,fUA:62,fFA:118,
+    nThigh:96,nShin:84,fThigh:82,fShin:96,
+    crouch:0, lean:0
+  };
+
+  // subtle breathing / shifting in idle
+  const breathe=Math.sin(performance.now()/420)*1.3;
+  pose.rootY=breathe;
+
+  if(!anim)return pose;
+  const elapsed=performance.now()-anim.start;
+  const t=Math.max(0,Math.min(1,elapsed/anim.duration));
+  const q=ease(t);
+  const isAtt=(anim.attacker===side);
+  const isDef=(anim.attacker!=='none' && anim.attacker!==side);
+
+  if(anim.type==='strike'){
+    if(isAtt){
+      pose.rootX=42*q;
+      pose.torsoRot=-10*q;
+      pose.nUA=lerp(118,10,q);
+      pose.nFA=lerp(48,2,q);
+      pose.fUA=lerp(62,35,q);
+      pose.fFA=lerp(118,70,q);
+      pose.nThigh=lerp(96,80,q);
+      pose.nShin=lerp(84,98,q);
+    }else if(isDef){
+      pose.rootX=-10*q; pose.torsoRot=12*q; pose.headRot=18*q;
+      pose.nUA=150; pose.nFA=25; pose.fUA=40; pose.fFA=95;
+    }
+  }
+  if(anim.type==='grapple'){
+    if(isAtt){
+      pose.rootX=34*q; pose.torsoRot=-6*q;
+      pose.nUA=lerp(118,25,q); pose.nFA=lerp(48,2,q);
+      pose.fUA=lerp(62,12,q);  pose.fFA=lerp(118,5,q);
+      pose.nThigh=88; pose.fThigh=93;
+    }else if(isDef){
+      pose.rootX=-6*q; pose.torsoRot=8*q;
+      pose.nUA=135;pose.nFA=60;pose.fUA=50;pose.fFA=130;
+    }
+  }
+  if(anim.type==='counter'){
+    if(isAtt){
+      pose.rootX=18*q; pose.torsoRot=-14*q;
+      pose.nUA=35;pose.nFA=330;pose.fUA=18;pose.fFA=345;
+      pose.nThigh=86;pose.nShin=95;
+    }else if(isDef){
+      pose.rootX=10*q;pose.torsoRot=20*q;pose.headRot=18*q;
+      pose.nUA=150;pose.nFA=20;
+    }
+  }
+  if(anim.type==='clash'){
+    pose.rootX=(side==='p'?1:-1)*24*q;
+    pose.nUA=side==='p'?20:160;
+    pose.nFA=side==='p'?0:180;
+    pose.fUA=side==='p'?28:152;
+    pose.fFA=side==='p'?8:172;
+    pose.torsoRot=(side==='p'?-5:5)*q;
+  }
+  if(anim.type==='finisher'){
+    if(isAtt){
+      pose.rootX=45*q; pose.crouch=12*q; pose.torsoRot=-18*q;
+      pose.nUA=18;pose.nFA=350;pose.fUA=10;pose.fFA=345;
+      pose.nThigh=78;pose.nShin=105;pose.fThigh=104;pose.fShin=75;
+    }else if(isDef){
+      pose.rootX=-5*q;pose.torsoRot=26*q;pose.headRot=25*q;
+      pose.nUA=145;pose.nFA=80;pose.fUA=40;pose.fFA=120;
+    }
+  }
+  if(anim.type==='pin'){
+    if(isAtt){
+      pose.rootX=45*q;pose.rootY=28*q;pose.torsoRot=60*q;
+      pose.nUA=10;pose.nFA=340;pose.fUA=20;pose.fFA=350;
+      pose.nThigh=55;pose.nShin=120;pose.fThigh=130;pose.fShin=65;
+    }else if(isDef){
+      pose.rootY=35*q;pose.torsoRot=88*q;pose.headRot=20*q;
+      pose.nThigh=20;pose.nShin=340;pose.fThigh=160;pose.fShin=200;
+    }
+  }
+  return pose;
+}
+
+function drawWrestler(cx,cy,scale,flip,shirt,side){
+  const p=getPose(side);
+  const dir=flip?-1:1;
+  ctx.save();
+  ctx.translate(cx + dir*p.rootX, cy+p.rootY+p.crouch);
+  ctx.scale(dir*scale,scale);
+
+  // shadow
+  ctx.save();ctx.scale(dir,1);ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.ellipse(0,52,34,8,0,0,Math.PI*2);ctx.fill();ctx.restore();
+
+  // torso + pelvis (part 2)
+  ctx.save();
+  ctx.rotate(p.torsoRot*RAD);
+  ctx.fillStyle=shirt;
+  ctx.beginPath();ctx.moveTo(-23,-24);ctx.quadraticCurveTo(0,-34,24,-20);ctx.lineTo(15,17);ctx.lineTo(-16,17);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#111';
+  ctx.beginPath();ctx.moveTo(-16,8);ctx.lineTo(16,8);ctx.lineTo(13,25);ctx.lineTo(-13,25);ctx.closePath();ctx.fill();
+
+  // shoulders/hips are anchored to torso
+  const nShoulder={x:-17,y:-16}, fShoulder={x:16,y:-14};
+  const nHip={x:-9,y:19}, fHip={x:8,y:18};
+
+  // far arm parts behind torso front-depth
+  let fEl=rotPoint(fShoulder.x,fShoulder.y,27,p.fUA);
+  drawRoundedSegment(fShoulder.x,fShoulder.y,fEl.x,fEl.y,12,'#b97850'); // part 4
+  let fHand=rotPoint(fEl.x,fEl.y,25,p.fFA);
+  drawRoundedSegment(fEl.x,fEl.y,fHand.x,fHand.y,11,'#c88b61'); // part 6
+
+  // far leg parts
+  let fK=rotPoint(fHip.x,fHip.y,31,p.fThigh);
+  drawRoundedSegment(fHip.x,fHip.y,fK.x,fK.y,15,'#1a1a1a'); // part 8
+  let fFoot=rotPoint(fK.x,fK.y,30,p.fShin);
+  drawRoundedSegment(fK.x,fK.y,fFoot.x,fFoot.y,13,'#252525'); // part 10
+  drawRoundedSegment(fFoot.x,fFoot.y,fFoot.x+12,fFoot.y+1,9,'#050505');
+
+  // near leg parts (front)
+  let nK=rotPoint(nHip.x,nHip.y,32,p.nThigh);
+  drawRoundedSegment(nHip.x,nHip.y,nK.x,nK.y,16,'#242424'); // part 7
+  let nFoot=rotPoint(nK.x,nK.y,31,p.nShin);
+  drawRoundedSegment(nK.x,nK.y,nFoot.x,nFoot.y,14,'#303030'); // part 9
+  drawRoundedSegment(nFoot.x,nFoot.y,nFoot.x-13,nFoot.y+1,10,'#050505');
+
+  // near arm parts
+  let nEl=rotPoint(nShoulder.x,nShoulder.y,29,p.nUA);
+  drawRoundedSegment(nShoulder.x,nShoulder.y,nEl.x,nEl.y,13,'#d49a70'); // part 3
+  let nHand=rotPoint(nEl.x,nEl.y,26,p.nFA);
+  drawRoundedSegment(nEl.x,nEl.y,nHand.x,nHand.y,12,'#d49a70'); // part 5
+
+  // head (part 1), attached above torso
+  ctx.save();
+  ctx.translate(-1,-47);
+  ctx.rotate(p.headRot*RAD);
+  ctx.fillStyle='#d7a078';ctx.beginPath();ctx.ellipse(0,0,16,18,-.08,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#b87850';ctx.beginPath();ctx.arc(14,0,4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#2b1b13';ctx.beginPath();ctx.arc(-3,-9,13,Math.PI,Math.PI*2);ctx.lineTo(10,-4);ctx.quadraticCurveTo(-1,-13,-15,-4);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#222';ctx.beginPath();ctx.arc(-6,0,1.5,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(4,-1,1.5,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#7b4d36';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-3,7);ctx.lineTo(5,7);ctx.stroke();
+  ctx.restore();
+
+  ctx.restore(); // torso rotation
+  ctx.restore();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const floor=ring();
+  drawWrestler(W*.34,floor-54,1.25,false,'#316cc1','p');
+  drawWrestler(W*.66,floor-54,1.25,true,'#b23a32','e');
+  requestAnimationFrame(draw);
+}
+reset();draw();
+</script>
+</body>
+</html>
